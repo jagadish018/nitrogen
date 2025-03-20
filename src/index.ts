@@ -33,6 +33,31 @@ app.post("/customers", async (c) => {
   }
 });
 
+//Get the top 5 customers based on the number of orders placed
+app.get("/customers/top", async (c) => {
+  try {
+    const topCustomers = await prisma.orders.groupBy({
+      by: ["customerId"],
+      _count: { customerId: true },
+      orderBy: { _count: { customerId: "desc" } },
+      take: 5,
+    });
+
+    const result = await Promise.all(
+      topCustomers.map(async (entry) => {
+        const customer = await prisma.customers.findUnique({
+          where: { id: entry.customerId },
+        });
+        return { customer, orderCount: entry._count.customerId };
+      })
+    );
+
+    return c.json(result);
+  } catch (error) {
+    console.error(error);
+    return c.json({ message: "Failed to retrieve top customers" }, 500);
+  }
+});
 //get all customers
 app.get("/customers/:id", async (c) => {
   try {
@@ -59,7 +84,10 @@ app.get("/customers/:id/orders", async (c) => {
     const orders = await prisma.orders.findMany({
       where: {
         customerId: Number(id),
-      },
+        
+      }, include: {
+        OrderItem:true
+      }
     });
     if (!orders) {
       return c.json({ message: "No orders found" }, 404);
@@ -81,6 +109,7 @@ app.post("/restaurants", async (c) => {
         location,
       },
     });
+    return c.json({ message: restaurant }, 200);
   } catch (error) {
     console.error(error);
     return c.json({ message: "Failed to create restaurant" }, 500);
@@ -89,35 +118,48 @@ app.post("/restaurants", async (c) => {
 
 //Get all available menu items from a restaurant
 app.get("/restaurants/:id/menu", async (c) => {
+  const restaurantId = Number(c.req.param("id"));
+
   try {
-    const { id } = await c.req.param();
-    const menu = await prisma.menuItems.findMany({
-      where: {
-        restaurantId: Number(id),
-      },
+    const menuItems = await prisma.restaurants.findMany({
+      where: { id: restaurantId },
+      include: { MenuItems: true },
     });
-    if (!menu) {
-      return c.json({ message: "No menu items found" }, 404);
+
+    if (!menuItems) {
+      return c.json({ message: "No available menu items found" }, 404);
     }
-    return c.json({ message: menu }, 200);
+
+    return c.json(menuItems, 200);
   } catch (error) {
-    console.error(error);
-    return c.json({ message: "Failed to get menu items" }, 500);
+    console.error("Error fetching menu items:", error);
+    return c.json({ error: "Internal Server Error" }, 500);
   }
 });
 
-//Add a menu item to a restaurant
+// Add a menu item to a restaurant
 app.post("/restaurants/:id/menu", async (c) => {
   try {
-    const { restaurantId, name, price, isAvailable } = await c.req.json();
+    const restaurantId = Number(c.req.param("id")); // Extracting from URL
+    const { name, price } = await c.req.json();
+
+    // Check if the restaurant exists
+    const restaurant = await prisma.restaurants.findUnique({
+      where: { id: restaurantId },
+    });
+    if (!restaurant) {
+      return c.json({ message: "Restaurant not found" }, 404);
+    }
+
+    // Create the menu item
     const menuItem = await prisma.menuItems.create({
       data: {
-        restaurantId: Number(restaurantId),
         name,
-        price,
-        isAvailable,
+        price: Number(price),
+        restaurantId,
       },
     });
+
     return c.json({ message: menuItem }, 201);
   } catch (error) {
     console.error(error);
@@ -150,38 +192,70 @@ app.patch("/menu/:id", async (c) => {
 //Place an order (includes items and quantities)
 app.post("/orders", async (c) => {
   try {
-    const { customerId, restaurantId, status, totalPrice, orderTime } =
-      await c.req.json();
+    const { customerId, restaurantId, items } = await c.req.json();
 
-    // Optional: Validate if customer and restaurant exist (to avoid FK constraint issues)
-    const customerExists = await prisma.customers.findUnique({
+    // Validate customer and restaurant
+    const customer = await prisma.customers.findUnique({
       where: { id: Number(customerId) },
     });
-    const restaurantExists = await prisma.restaurants.findUnique({
+    const restaurant = await prisma.restaurants.findUnique({
       where: { id: Number(restaurantId) },
     });
 
-    if (!customerExists) {
-      return c.json({ message: "Customer does not exist" }, 400);
-    }
-
-    if (!restaurantExists) {
+    if (!customer) return c.json({ message: "Customer does not exist" }, 400);
+    if (!restaurant)
       return c.json({ message: "Restaurant does not exist" }, 400);
-    }
 
-    // Create order
+    // Step 1: Create the Order with initial values
     const order = await prisma.orders.create({
       data: {
         customerId: Number(customerId),
         restaurantId: Number(restaurantId),
-        status,
-        totalPrice: Number(totalPrice),
-        orderTime,
+        status: "Placed",
+        totalPrice: 0,
       },
     });
 
-    console.log("Order placed successfully");
-    return c.json({ message: order }, 200);
+    let totalPrice = 0;
+
+    // Step 2: Iterate items to calculate total and create OrderItems
+    for (const item of items) {
+      const menuItem = await prisma.menuItems.findUnique({
+        where: { id: Number(item.menuItemId) },
+      });
+
+      if (!menuItem || !menuItem.isAvailable) {
+        return c.json(
+          {
+            message: `Menu item ID ${item.menuItemId} not found or unavailable`,
+          },
+          400
+        );
+      }
+
+      const itemTotal = Number(menuItem.price) * item.quantity;
+      totalPrice += itemTotal;
+
+      // Create entry in OrderItem table
+      await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          menuItemId: menuItem.id,
+          quantity: item.quantity,
+        },
+      });
+    }
+
+    // Step 3: Update the order with computed totalPrice
+    const updatedOrder = await prisma.orders.update({
+      where: { id: order.id },
+      data: {
+        totalPrice: totalPrice,
+        status: "Placed", // Still placed
+      },
+    });
+
+    return c.json({ message: updatedOrder }, 201);
   } catch (error) {
     console.error(error);
     return c.json({ message: "Failed to place order" }, 500);
