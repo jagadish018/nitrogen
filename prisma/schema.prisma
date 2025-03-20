@@ -24,7 +24,7 @@ model Customers {
 
 model Restaurants {
   id        Int         @id @default(autoincrement())
-  name      String
+  name      String      @unique
   location  String
   MenuItems MenuItems[]
   Orders    Orders[]
@@ -32,7 +32,7 @@ model Restaurants {
 
 model MenuItems {
   id           Int         @id @default(autoincrement())
-  name         String
+  name         String      
   price        Decimal
   isAvailable  Boolean     @default(true)
   restaurant   Restaurants @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
@@ -45,7 +45,7 @@ model Orders {
   customerId      Int
   restaurantId    Int
   status          Status      @default(Placed)
-  totalPrice Float
+  totalPrice      Float
   orderTime       DateTime    @default(now())
   customers       Customers   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   restaurants     Restaurants @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
