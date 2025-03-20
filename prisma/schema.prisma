@@ -13,4 +13,57 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Customers {
+  id          Int      @id @default(autoincrement())
+  name        String
+  email       String   @unique
+  phoneNumber String   @unique
+  address     String
+  Orders      Orders[]
+}
 
+model Restaurants {
+  id        Int         @id @default(autoincrement())
+  name      String
+  location  String
+  MenuItems MenuItems[]
+  Orders    Orders[]
+}
+
+model MenuItems {
+  id           Int         @id @default(autoincrement())
+  name         String
+  price        Decimal
+  isAvailable  Boolean     @default(true)
+  restaurant   Restaurants @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantId Int
+  OrderItem    OrderItem[]
+}
+
+model Orders {
+  id              Int         @id @default(autoincrement())
+  customerId      Int
+  restaurantId    Int
+  status          Status      @default(Placed)
+  totaltotalPrice Decimal
+  orderTime       DateTime    @default(now())
+  customers       Customers   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  restaurants     Restaurants @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  OrderItem       OrderItem[]
+}
+
+model OrderItem {
+  id         Int       @id @default(autoincrement())
+  orderId    Int
+  menuItemId Int
+  quantity   Int
+  order      Orders    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem   MenuItems @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+}
+
+enum Status {
+  Placed
+  Preparing
+  Completed
+  Cancelled
+}
