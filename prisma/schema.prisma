@@ -45,7 +45,7 @@ model Orders {
   customerId      Int
   restaurantId    Int
   status          Status      @default(Placed)
-  totaltotalPrice Decimal
+  totalPrice Float
   orderTime       DateTime    @default(now())
   customers       Customers   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   restaurants     Restaurants @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
